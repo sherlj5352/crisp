@@ -1,0 +1,189 @@
+# yamllint disable-line rule:line-length
+workflow:
+  metadata:
+    generateName: crisplit-
+  annotations:
+    workflows.ml.argoproj.io/description: |
+      Perform a training sequence
+      Find parameter optimized network
+  spec:
+    arguments:
+      parameters:
+        - name: train_image
+          value: 'localhost:32000/pytorch-train:0.0.71'
+        - name: batch_size
+          value: 2
+        - name: output_name
+          value: 20220609abacus
+        - name: target_structure
+          value: 0.0
+        - name: dataset
+          value: lit
+        - name: width
+          value: 640
+        - name: height
+          value: 640
+          # Start step to test/recover failed runs
+        - name: start
+          value: 0
+          # Start container and wait for debugger to attach
+        - name: debug
+          value: false
+          # Perform minimum run to test code execution
+        - name: min
+          value: false
+        - name: tensorboardport
+          value: 36008
+
+    entrypoint: train-crisp
+    priority: 1
+    templates:
+      - name: train-crisp
+        dag:
+          tasks:
+            - name: train-fine
+              template: train
+              when: "{{workflow.parameters.start}} < 1"
+              arguments:
+                parameters:
+                  - {name: prune, value: false}
+                  - {name: train, value: true}
+                  - {name: test, value: true}
+                  - {name: search_structure, value: true}
+                  - {name: k_structure, value: 0.1}
+                  - {name: target_structure, value: "{{workflow.parameters.target_structure}}"}
+                  - {name: learning_rate, value: 1e-4}
+                  - {name: start_epoch, value: 0}
+                  - {name: epochs, value: 35}
+                  - {name: ejector, value: 'prune_basis'}
+                  - {name: ejector_start, value: 25}
+                  - {name: ejector_full, value: 30}
+                  - {name: ejector_max, value: 1}
+                  - {name: model_src, value: "crisplit_20226060abacus0_01"}
+                  - {name: model_dest, value: "crisplit_{{workflow.parameters.output_name}}{{workflow.parameters.target_structure}}_train-fine"}
+                  - {name: description, value: '{"author":"sherlg","description":"Crisp segment optimize obective and size target size {{workflow.parameters.target_structure}}"}'}
+                artifacts:
+                  - name: prev_results
+                    raw:
+                      data: |
+                        batches: 0
+            - name: prune
+              dependencies: [train-fine]
+              template: train
+              when: "{{workflow.parameters.start}} < 2"
+              arguments:
+                parameters:
+                  - {name: prune, value: true}
+                  - {name: train, value: true}
+                  - {name: test, value: true}
+                  - {name: search_structure, value: false}
+                  - {name: learning_rate, value: 1e-4}
+                  - {name: epochs, value: 15}
+                  - {name: target_structure, value: '{{workflow.parameters.target_structure}}'}
+                  - {name: model_src, value: "crisplit_{{workflow.parameters.output_name}}{{workflow.parameters.target_structure}}_train-fine"}
+                  - {name: model_dest, value: "crisplit_{{workflow.parameters.output_name}}{{workflow.parameters.target_structure}}_prune"}
+                  - {name: description, value: '{"author":"sherlg","description":"Crisp segment test-target-size {{workflow.parameters.target_structure}}"}'}
+                artifacts:
+                  - name: prev_results
+                    from: "{{tasks.train-fine.outputs.artifacts.results}}"
+
+      - name: train
+        inputs:
+          parameters:
+            - {name: prune, value: false}
+            - {name: train, value: true}
+            - {name: test, value: true}
+            - {name: onnx, value: false}
+            - {name: search_structure, value: true}
+            - {name: target_structure, value: "{{workflow.parameters.target_structure}}"}
+            - {name: epochs, value: 2}
+            - {name: start_epoch, value: 0}
+            - {name: ejector, value: 'None'}
+            - {name: ejector_start, value: 0}
+            - {name: ejector_full, value: 2}
+            - {name: ejector_max, value: 1.0}
+            - {name: k_prune_basis, value: 1.0}
+            - {name: model_src, value: ""}
+            - {name: model_dest, value: "crisplit_{{workflow.parameters.output_name}}"}
+            - {name: k_structure, value: 0.1}
+            - {name: learning_rate, value: 1e-4}
+            - {name: class_weight, value: "[1.0, 1.0]"}
+            - {name: description, value: '{"author":"sherlg","description":"Crisp LIT segmentation"}'}
+            - {name: resultspath, value: "/app/results.yaml"}
+            - {name: prevresultspath, value: "/app/prevresults.yaml"}
+
+          artifacts:
+            - name: prev_results
+              path: "{{inputs.parameters.prevresultspath}}"
+        outputs:
+          parameters:
+            - name: results
+              valueFrom:
+                path: '{{inputs.parameters.resultspath}}'
+          artifacts:
+            - name: results
+              path: '{{inputs.parameters.resultspath}}'
+        # Shared memory volume needed for worker threads:
+        # https://stackoverflow.com/questions/46085748/define-size-for-dev-shm-on-container-engine/46434614#46434614
+        volumes:
+          - name: dshm
+            emptyDir:
+              medium: Memory
+        container:
+          image: '{{workflow.parameters.train_image}}'
+          volumeMounts:
+            - mountPath: /dev/shm
+              name: dshm
+          command:
+            - python3
+          args:
+            - networks/network2d.py
+            - -dataset={{workflow.parameters.dataset}}
+            - -height={{workflow.parameters.height}}
+            - -width={{workflow.parameters.width}}
+            - -prune={{inputs.parameters.prune}}
+            - -train={{inputs.parameters.train}}
+            - -epochs={{inputs.parameters.epochs}}
+            - -start_epoch={{inputs.parameters.start_epoch}}
+            - -test={{inputs.parameters.test}}
+            - -onnx={{inputs.parameters.onnx}}
+            - -search_structure={{inputs.parameters.search_structure}}
+            - -target_structure={{inputs.parameters.target_structure}}
+            - -k_structure={{inputs.parameters.k_structure}}
+            - -learning_rate={{inputs.parameters.learning_rate}}
+            - -model_src={{inputs.parameters.model_src}}
+            - -model_dest={{inputs.parameters.model_dest}}
+            - -tb_dest={{workflow.parameters.output_name}}_tb
+            - -description={{inputs.parameters.description}}
+            - -resultspath={{inputs.parameters.resultspath}}
+            - -prevresultspath={{inputs.parameters.prevresultspath}}
+            - -batch_size={{workflow.parameters.batch_size}}
+            - -class_weight={{inputs.parameters.class_weight}}
+            - -batch_norm=true
+            - -job
+            - -k_prune_basis={{inputs.parameters.k_prune_basis}}
+            - -ejector={{inputs.parameters.ejector}}
+            - -ejector_start={{inputs.parameters.ejector_start}}
+            - -ejector_full={{inputs.parameters.ejector_full}}
+            - -ejector_max={{inputs.parameters.ejector_max}}
+            - -debug={{workflow.parameters.debug}}
+            - -minimum={{workflow.parameters.min}}
+            - -lit_dataset=annotations/lit/dataset.yaml
+            - -lit_class_dict=model/crisplit/lit.json
+            - -k_prune_sigma=1.0
+          ports:
+            - name: debug
+              containerPort: 3000
+            - name: tensorboard
+              containerPort: 6006
+              hostPort: {{workflow.parameters.tensorboardport}}
+          resources:
+            requests:
+              ephemeral-storage: "40Gi"
+              "nvidia.com/gpu": '1'
+            limits:
+              ephemeral-storage: "40Gi"
+              "nvidia.com/gpu": '1'
+          retryStrategy:
+            limit: "3"
+            retryPolicy: "Always"

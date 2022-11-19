@@ -1,0 +1,40 @@
+FROM nvcr.io/nvidia/pytorch:22.09-py3
+LABEL maintainer="sherlg"
+
+#USER root
+ENV TZ=America/Los_Angeles
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+
+RUN --mount=type=cache,target=/var/cache/apt \ 
+    apt-get update -y && apt-get install -y --no-install-recommends \
+    libgl1-mesa-glx \
+    ffmpeg \
+    wget && \
+    rm -rf /var/lib/apt/lists/*
+
+#RUN useradd -D user
+#USER user
+#WORKDIR /home/user
+
+COPY requirements_train.txt .
+RUN --mount=type=cache,target=/var/cache/apt \
+    pip3 install -r requirements_train.txt
+
+RUN echo 'alias py=python3' >> ~/.bashrc
+
+WORKDIR /app
+ENV LANG C.UTF-8
+ENV PYTHONUNBUFFERED=1
+
+# port 3000: debugger
+# port 6006: tensorboard
+EXPOSE 3000 6006 
+# PYTHONUNBUFFERED=1 smooths the logfile updates in Kubernetes
+
+#ARG CACHEBUST 
+COPY networks networks
+COPY config config
+COPY creds.yaml creds.yaml
+
+# Launch training
+CMD ["python3","-u", "networks/cell2d.py"]

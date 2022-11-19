@@ -1,0 +1,56 @@
+source ./config/config.sh
+
+if [ "$1" != "" ]; then
+    UTIL_PORTS=$1
+elif [[ -z "${UTIL_PORTS}" ]]; then
+    UTIL_PORTS=32201
+fi
+
+if [ "$2" != "" ]; then
+    gpus="$2"
+elif [[ -z "${gpus}" ]]; then
+    #gpus='"device=0,1"'
+    gpus='"device=0"'
+    #gpus='all' 
+fi
+
+if [ "$3" != "" ]; then
+    image_name="$3"
+elif [[ -z "${image_name}" ]]; then
+    image_name=${crispdev}
+fi
+echo image_name=${image_name}
+
+if [ "$4" != "" ]; then
+    CONTAINER_NAME="$4"
+elif [[ -z "${CONTAINER_NAME}" ]]; then
+    CONTAINER_NAME='crispdev'
+fi
+echo CONTAINER_NAME=${CONTAINER_NAME}
+
+iPort=${UTIL_PORTS}
+SSH_PORT=$((iPort++))
+PORT1=$((iPort++))
+PORT2=$((iPort++))
+PORT3=$((iPort++))
+PORT4=$((iPort++))
+PORT5=$((iPort++))
+
+echo UTIL_PORTS ${PORT1} ${PORT2} ${PORT3} ${PORT4} ${PORT5}
+
+docker stop ${CONTAINER_NAME} || true && docker rm ${CONTAINER_NAME} || true
+
+set -x
+
+docker run --ipc=host --gpus $gpus --restart unless-stopped  \
+    --name $CONTAINER_NAME \
+    -p $SSH_PORT:22 \
+    -p ${PORT1}:3000 \
+    -p ${PORT2}:5000 \
+    -p ${PORT3}:6006 \
+    -p ${PORT4}:8888 \
+    -v /data1:/data1 \
+    -v /data2:/data2 \
+    -v /data3:/data3 \
+    -v /data4:/data4 \
+    ${image_name} &

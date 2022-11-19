@@ -1,0 +1,9 @@
+__pycache__/
+.ipynb_checkpoints/
+tb_logs/
+dataset/
+function/
+test/
+
+creds.yaml
+.vscode/
